@@ -14,6 +14,7 @@ let scanManager: ScanManager;
 let diagnosticsManager: DiagnosticsManager;
 let findingsProvider: FindingsProvider;
 let summaryProvider: SummaryProvider;
+let codeLensProvider_: CodeLensProvider | null = null;
 let statusBarItem: vscode.StatusBarItem;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -21,10 +22,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   authManager = new AuthManager(context);
   client = new OmniGuardClient(authManager);
-  scanManager = new ScanManager(client, diagnosticsManager!, context);
   diagnosticsManager = new DiagnosticsManager();
-
-  // Wire DiagnosticsManager into ScanManager so Problems panel actually populates
+  scanManager = new ScanManager(client, context);
   scanManager.setDiagnosticsManager(diagnosticsManager);
 
   findingsProvider = new FindingsProvider(scanManager, context);
@@ -34,6 +33,7 @@ export async function activate(context: vscode.ExtensionContext) {
   vscode.window.registerTreeDataProvider('omniguard.summary', summaryProvider);
 
   const codeLensProvider = new CodeLensProvider(scanManager);
+  codeLensProvider_ = codeLensProvider;
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(
       [
@@ -129,10 +129,8 @@ async function runFileScan(filePath: string, content: string): Promise<void> {
   updateStatusBar();
   findingsProvider.refresh();
   summaryProvider.refresh();
-  codeLensProvider_?.refresh();
+  if (codeLensProvider_) codeLensProvider.refresh();
 }
-
-let codeLensProvider_: CodeLensProvider | null = null;
 
 // ─── Status bar ───────────────────────────────────────────────────────────────
 

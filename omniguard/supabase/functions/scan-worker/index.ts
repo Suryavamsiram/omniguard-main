@@ -423,12 +423,81 @@ async function processScan(scanId: string, repoId: string, orgId: string): Promi
       metadata: { findings: verified.length, duration_seconds: dur, files: files.length, ai: aiCfg.provider } })
     await supabase.from("worker_heartbeats").upsert({ worker_id: WORKER_ID, status: "idle", current_scan_id: null, last_heartbeat: new Date().toISOString() }, { onConflict: "worker_id" })
 
+    // Update Prometheus-style metrics
+    METRICS.scans_total += 1
+    METRICS.findings_total += verified.length
+    METRICS.findings_critical += summary.critical
+    METRICS.findings_high += summary.high
+    METRICS.files_scanned_total += files.length
+    METRICS.duration_seconds_sum += dur
+    METRICS.last_scan_timestamp = Date.now()
+
   } catch (err) {
     console.error(`[scan-worker] ${scanId} FAILED:`, err)
+    METRICS.scans_failed += 1
     await supabase.from("scans").update({ status: "failed", error_message: err instanceof Error ? err.message : String(err), completed_at: new Date().toISOString(), duration_seconds: Math.round((Date.now() - t0) / 1000) }).eq("id", scanId)
     await supabase.from("worker_heartbeats").upsert({ worker_id: WORKER_ID, status: "error", current_scan_id: null, last_heartbeat: new Date().toISOString() }, { onConflict: "worker_id" })
     throw err
   }
+}
+
+// ── Metrics (Prometheus format) ───────────────────────────────────
+const METRICS = {
+  scans_total: 0,
+  scans_failed: 0,
+  findings_total: 0,
+  findings_critical: 0,
+  findings_high: 0,
+  ai_calls_total: 0,
+  ai_tokens_total: 0,
+  files_scanned_total: 0,
+  duration_seconds_sum: 0,
+  last_scan_timestamp: 0,
+}
+
+function prometheusFormat(): string {
+  const now = Date.now()
+  return `# HELP omniguard_scans_total Total number of scans processed
+# TYPE omniguard_scans_total counter
+omniguard_scans_total{worker_id="${WORKER_ID}"} ${METRICS.scans_total}
+
+# HELP omniguard_scans_failed_total Total number of failed scans
+# TYPE omniguard_scans_failed_total counter
+omniguard_scans_failed_total{worker_id="${WORKER_ID}"} ${METRICS.scans_failed}
+
+# HELP omniguard_findings_total Total findings detected
+# TYPE omniguard_findings_total counter
+omniguard_findings_total{worker_id="${WORKER_ID}"} ${METRICS.findings_total}
+
+# HELP omniguard_findings_by_severity Findings by severity
+# TYPE omniguard_findings_by_severity counter
+omniguard_findings_by_severity{severity="critical",worker_id="${WORKER_ID}"} ${METRICS.findings_critical}
+omniguard_findings_by_severity{severity="high",worker_id="${WORKER_ID}"} ${METRICS.findings_high}
+
+# HELP omniguard_ai_calls_total Total AI API calls
+# TYPE omniguard_ai_calls_total counter
+omniguard_ai_calls_total{worker_id="${WORKER_ID}"} ${METRICS.ai_calls_total}
+
+# HELP omniguard_ai_tokens_total Total AI tokens consumed
+# TYPE omniguard_ai_tokens_total counter
+omniguard_ai_tokens_total{worker_id="${WORKER_ID}"} ${METRICS.ai_tokens_total}
+
+# HELP omniguard_files_scanned_total Total files scanned
+# TYPE omniguard_files_scanned_total counter
+omniguard_files_scanned_total{worker_id="${WORKER_ID}"} ${METRICS.files_scanned_total}
+
+# HELP omniguard_scan_duration_seconds_sum Total scan duration
+# TYPE omniguard_scan_duration_seconds_sum counter
+omniguard_scan_duration_seconds_sum{worker_id="${WORKER_ID}"} ${METRICS.duration_seconds_sum}
+
+# HELP omniguard_last_scan_timestamp Unix timestamp of last scan
+# TYPE omniguard_last_scan_timestamp gauge
+omniguard_last_scan_timestamp{worker_id="${WORKER_ID}"} ${METRICS.last_scan_timestamp}
+
+# HELP omniguard_worker_info Worker information
+# TYPE omniguard_worker_info gauge
+omniguard_worker_info{worker_id="${WORKER_ID}",version="1.0.0"} 1
+`
 }
 
 Deno.serve(async (req: Request) => {
@@ -436,8 +505,12 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url)
 
   if (req.method === "GET" && url.pathname.endsWith("/health")) {
-    return new Response(JSON.stringify({ worker_id: WORKER_ID, status: "healthy", timestamp: new Date().toISOString() }),
+    return new Response(JSON.stringify({ worker_id: WORKER_ID, status: "healthy", timestamp: new Date().toISOString(), metrics: METRICS }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+  }
+
+  if (req.method === "GET" && url.pathname.endsWith("/metrics")) {
+    return new Response(prometheusFormat(), { headers: { "Content-Type": "text/plain; version=0.0.4" } })
   }
 
   if (req.method === "GET" && url.pathname.endsWith("/process")) {

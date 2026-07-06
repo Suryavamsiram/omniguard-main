@@ -11,7 +11,7 @@ export class ScanManager {
   private fileFindings: Map<string, Finding[]> = new Map();
   private summary = { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 
-  constructor(client: OmniGuardClient, _diagnosticsManager: DiagnosticsManager | null, context: vscode.ExtensionContext) {
+  constructor(client: OmniGuardClient, context: vscode.ExtensionContext) {
     this.client = client;
     this.context = context;
   }

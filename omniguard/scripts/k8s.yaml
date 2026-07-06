@@ -1,15 +1,47 @@
+# OmniGuard Kubernetes Deployment
+# Usage: kubectl apply -f k8s.yaml
+#
+# Prerequisites:
+#   1. Create namespace: kubectl create namespace omniguard
+#   2. Create secret:
+#      kubectl create secret generic omniguard-secrets -n omniguard \
+#        --from-literal=VITE_SUPABASE_URL=https://xyz.supabase.co \
+#        --from-literal=VITE_SUPABASE_ANON_KEY=eyJ...
+#   3. Configure Ingress host, TLS as needed
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omniguard
+  labels:
+    app.kubernetes.io/name: omniguard
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omniguard-config
+  namespace: omniguard
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: omniguard-dashboard
   namespace: omniguard
   labels:
-    app: omniguard-dashboard
+    app.kubernetes.io/name: omniguard
+    app.kubernetes.io/component: dashboard
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: omniguard-dashboard
+      app.kubernetes.io/name: omniguard
+      app.kubernetes.io/component: dashboard
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -18,56 +50,91 @@ spec:
   template:
     metadata:
       labels:
-        app: omniguard-dashboard
+        app.kubernetes.io/name: omniguard
+        app.kubernetes.io/component: dashboard
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "80"
+        prometheus.io/path: "/metrics"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
       containers:
         - name: dashboard
-          image: omniguard:latest
+          image: ghcr.io/omniguard/omniguard:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: omniguard-config
+            - secretRef:
+                name: omniguard-secrets
           resources:
             requests:
-              cpu: "100m"
-              memory: "64Mi"
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: "500m"
-              memory: "256Mi"
+              cpu: 500m
+              memory: 512Mi
           readinessProbe:
             httpGet:
               path: /health
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: omniguard-dashboard
   namespace: omniguard
+  labels:
+    app.kubernetes.io/name: omniguard
 spec:
-  selector:
-    app: omniguard-dashboard
+  type: ClusterIP
   ports:
     - port: 80
-      targetPort: 80
-  type: ClusterIP
+      targetPort: http
+      name: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: omniguard
+    app.kubernetes.io/component: dashboard
+
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: omniguard-dashboard
+  name: omniguard-ingress
   namespace: omniguard
+  labels:
+    app.kubernetes.io/name: omniguard
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   tls:
@@ -85,16 +152,12 @@ spec:
                 name: omniguard-dashboard
                 port:
                   number: 80
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: omniguard
+
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: omniguard-dashboard
+  name: omniguard-hpa
   namespace: omniguard
 spec:
   scaleTargetRef:
@@ -110,3 +173,21 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: omniguard-pdb
+  namespace: omniguard
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omniguard
