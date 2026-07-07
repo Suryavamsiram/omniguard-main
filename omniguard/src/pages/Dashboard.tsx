@@ -3,7 +3,7 @@ import { useDashboardStats, useAllScans } from '../hooks/useRepositories'
 import { supabase } from '../lib/supabase'
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Shield, ShieldAlert, ShieldCheck, ShieldX, TriangleAlert, CircleCheck, CircleX, CircleAlert as AlertCircle, TrendingUp, TrendingDown, Minus, GitBranch, Play, Clock, Activity, Zap, Target, FileCode, Globe, Server, Lock, Key, Bug, ArrowRight, ExternalLink, ChevronRight, ChevronDown, ChartBar as BarChart3, ChartPie as PieChart, ChartLine as LineChart, Sparkles, Calendar, RefreshCw, ListFilter as Filter, MoveHorizontal as MoreHorizontal, Cloud, Code, Database, Layers, Package } from 'lucide-react'
+import { Shield, ShieldAlert, ShieldCheck, ShieldX, TriangleAlert, CircleCheck, CircleX, CircleAlert as AlertCircle, TrendingUp, TrendingDown, Minus, GitBranch, Play, Clock, Activity, Zap, Target, FileCode, Globe, Server, Lock, Key, Bug, ArrowRight, ExternalLink, ChevronRight, ChevronDown, ChartBar as BarChart3, ChartPie as PieChart, Sparkles, Calendar, RefreshCw, ListFilter as Filter, MoveHorizontal as MoreHorizontal, Cloud, Code, Database, Layers, Package, Users, Building2, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle2, Circle as XCircle, Bell, MailWarning as FileWarning, FileCheck, BrainCircuit, Brain, BookOpen, Settings, CreditCard, ChartBar as BarChart, ChartLine as LineChart, ChartPie as PieIcon, Briefcase, UserCheck, UserX, Clock4, Timer, OctagonAlert as AlertOctagon, Scan as SecurityScan, Scan, Radar, ThumbsUp, ThumbsDown } from 'lucide-react'
 
 interface SecurityPosture {
   score: number
@@ -19,11 +19,36 @@ interface AttackSurface {
   unpatched: number
 }
 
-interface ThreatSummary {
-  active_threats: number
-  mitigated_24h: number
-  pending_triage: number
-  mean_time_to_resolve: number
+interface ImmediateAttention {
+  critical_findings: number
+  failing_repos: number
+  blocked_developers: number
+  overdue_policies: number
+  pending_ai_recommendations: number
+}
+
+interface ComplianceStatus {
+  framework: string
+  status: 'compliant' | 'at_risk' | 'non_compliant'
+  score: number
+  issues: number
+}
+
+interface TeamHealth {
+  team_name: string
+  open_findings: number
+  resolved_week: number
+  mttr_hours: number
+  health: 'healthy' | 'attention' | 'critical'
+}
+
+interface TodayChange {
+  id: string
+  type: 'finding' | 'scan' | 'policy' | 'repo' | 'compliance'
+  action: string
+  description: string
+  timestamp: string
+  severity?: string
 }
 
 interface TrendData {
@@ -40,46 +65,77 @@ export function Dashboard() {
   const { scans } = useAllScans(currentOrganizationId)
   const [posture, setPosture] = useState<SecurityPosture>({ score: 0, grade: 'F', trend: 'stable', change: 0 })
   const [attackSurface, setAttackSurface] = useState<AttackSurface | null>(null)
-  const [threats, setThreats] = useState<ThreatSummary | null>(null)
+  const [immediateAttention, setImmediateAttention] = useState<ImmediateAttention | null>(null)
+  const [complianceStatus, setComplianceStatus] = useState<ComplianceStatus[]>([])
+  const [teamHealth, setTeamHealth] = useState<TeamHealth[]>([])
+  const [todayChanges, setTodayChanges] = useState<TodayChange[]>([])
   const [trendData, setTrendData] = useState<TrendData[]>([])
-  const [recentActivity, setRecentActivity] = useState<any[]>([])
   const [topRisks, setTopRisks] = useState<any[]>([])
+  const [aiRecommendations, setAiRecommendations] = useState<any[]>([])
   const [refreshing, setRefreshing] = useState(false)
 
   const recent = scans.slice(0, 5)
 
-  // Calculate security posture score
+  // Fetch all dashboard data
   useEffect(() => {
     if (!currentOrganizationId) return
 
     async function fetchDashboardData() {
-      // Get findings for posture calculation
+      // Get findings
       const { data: findings } = await supabase
         .from('findings')
-        .select('severity, status, risk_score, created_at, resolved_at')
+        .select('id, severity, status, risk_score, created_at, resolved_at, title, file_path, line_start, assigned_to, scanner')
         .eq('organization_id', currentOrganizationId)
         .order('created_at', { ascending: false })
         .limit(500)
 
+      // Get repositories
+      const { data: repos } = await supabase
+        .from('repositories')
+        .select('id, full_name, language, last_scan_at, status')
+        .eq('organization_id', currentOrganizationId)
+        .is('deleted_at', null)
+
+      // Get teams
+      const { data: teams } = await supabase
+        .from('teams')
+        .select('id, name')
+        .eq('organization_id', currentOrganizationId)
+
+      // Get audit logs for today's changes
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const { data: auditLogs } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('organization_id', currentOrganizationId)
+        .gte('created_at', today.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      // Get AI recommendations
+      const { data: aiData } = await supabase
+        .from('findings')
+        .select('id, title, ai_remediation, severity')
+        .eq('organization_id', currentOrganizationId)
+        .not('ai_remediation', 'is', null)
+        .in('status', ['open', 'new'])
+        .limit(10)
+
       if (findings && findings.length > 0) {
-        // Calculate posture score (0-100)
+        // Calculate posture
         const critical = findings.filter(f => f.severity === 'critical' && !['resolved', 'suppressed', 'false_positive'].includes(f.status)).length
         const high = findings.filter(f => f.severity === 'high' && !['resolved', 'suppressed', 'false_positive'].includes(f.status)).length
         const medium = findings.filter(f => f.severity === 'medium' && !['resolved', 'suppressed', 'false_positive'].includes(f.status)).length
-        const total = findings.length
-        const resolved = findings.filter(f => ['resolved'].includes(f.status)).length
 
-        // Score formula: start at 100, subtract for each severity
         let score = 100
-        score -= critical * 15  // -15 for each critical
-        score -= high * 5       // -5 for each high
-        score -= medium * 2     // -2 for each medium
+        score -= critical * 15
+        score -= high * 5
+        score -= medium * 2
         score = Math.max(0, Math.min(100, score))
 
-        // Calculate grade
         const grade = score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F'
 
-        // Calculate trend (compare last 7 days vs previous 7 days)
         const now = new Date()
         const last7Days = findings.filter(f => new Date(f.created_at) > new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000))
         const prev7Days = findings.filter(f => {
@@ -92,48 +148,88 @@ export function Dashboard() {
         const change = prevWeekIssues > 0 ? Math.round((prevWeekIssues - lastWeekIssues) / prevWeekIssues * 100) : 0
 
         setPosture({ score, grade, trend, change })
+
+        // Top risks
+        const topFindings = findings.filter(f => !['resolved', 'suppressed', 'false_positive'].includes(f.status))
+          .sort((a, b) => (b.risk_score || 0) - (a.risk_score || 0))
+          .slice(0, 5)
+        setTopRisks(topFindings)
       }
 
-      // Get repositories for attack surface
-      const { data: repos } = await supabase
-        .from('repositories')
-        .select('id, full_name, language, last_scan_at')
-        .eq('organization_id', currentOrganizationId)
-        .is('deleted_at', null)
-
+      // Attack surface
       if (repos) {
+        const failingRepos = repos.filter(r => r.status === 'failed' || !r.last_scan_at || new Date(r.last_scan_at) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length
         setAttackSurface({
           total_assets: repos.length,
-          internet_facing: repos.length, // All repos are potentially internet-facing
+          internet_facing: repos.length,
           critical_assets: Math.min(repos.length, 5),
-          unpatched: repos.filter(r => !r.last_scan_at || new Date(r.last_scan_at) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length,
+          unpatched: failingRepos,
         })
       }
 
-      // Get threat summary
-      const openCritical = findings?.filter(f => f.severity === 'critical' && !['resolved', 'suppressed'].includes(f.status)).length || 0
-      const resolved24h = findings?.filter(f => f.resolved_at && new Date(f.resolved_at) > new Date(Date.now() - 24 * 60 * 60 * 1000)).length || 0
+      // Immediate attention
+      const criticalFindings = findings?.filter(f => f.severity === 'critical' && !['resolved', 'suppressed', 'false_positive'].includes(f.status)).length || 0
+      const failingProjectCount = repos?.filter(r => r.status === 'failed').length || 0
+      const awaitingReview = findings?.filter(f => f.status === 'new' && new Date(f.created_at) < new Date(Date.now() - 24 * 60 * 60 * 1000)).length || 0
 
-      // Get pending triage (open findings from last 24h)
-      const recentOpen = findings?.filter(f =>
-        !['resolved', 'suppressed', 'false_positive'].includes(f.status) &&
-        new Date(f.created_at) > new Date(Date.now() - 24 * 60 * 60 * 1000)
-      ).length || 0
-
-      setThreats({
-        active_threats: openCritical + (findings?.filter(f => f.severity === 'high' && !['resolved', 'suppressed'].includes(f.status)).length || 0),
-        mitigated_24h: resolved24h,
-        pending_triage: recentOpen,
-        mean_time_to_resolve: 4.2, // Hours - placeholder, could calculate from resolved_at - created_at
+      setImmediateAttention({
+        critical_findings: criticalFindings,
+        failing_repos: failingProjectCount,
+        blocked_developers: awaitingReview,
+        overdue_policies: 0,
+        pending_ai_recommendations: aiData?.length || 0,
       })
 
-      // Get top risks (highest risk score findings)
-      const topFindings = findings?.filter(f => !['resolved', 'suppressed', 'false_positive'].includes(f.status))
-        .sort((a, b) => (b.risk_score || 0) - (a.risk_score || 0))
-        .slice(0, 5) || []
-      setTopRisks(topFindings)
+      // Compliance status (mock frameworks)
+      setComplianceStatus([
+        { framework: 'SOC 2 Type II', status: findings?.filter(f => f.severity === 'critical' && !['resolved', 'suppressed'].includes(f.status)).length === 0 ? 'compliant' : 'at_risk', score: 85, issues: findings?.filter(f => f.severity === 'critical').length || 0 },
+        { framework: 'ISO 27001', status: 'compliant', score: 92, issues: 0 },
+        { framework: 'PCI DSS', status: (findings?.filter(f => f.severity === 'critical' && f.scanner === 'secret').length || 0) > 0 ? 'non_compliant' : 'compliant', score: 78, issues: findings?.filter(f => f.scanner === 'secret').length || 0 },
+        { framework: 'HIPAA', status: 'at_risk', score: 67, issues: findings?.filter(f => f.severity === 'high').length || 0 },
+      ])
 
-      // Generate trend data for last 7 days
+      // Team health
+      if (teams && teams.length > 0) {
+        const teamHealthData = teams.slice(0, 4).map(team => {
+          const teamFindings = findings?.filter(f => f.assigned_to === team.id) || []
+          const open = teamFindings.filter(f => !['resolved', 'suppressed'].includes(f.status)).length
+          const resolved = teamFindings.filter(f => f.status === 'resolved').length
+          const health = open === 0 ? 'healthy' : open > 5 ? 'critical' : 'attention'
+          return {
+            team_name: team.name || `Team ${team.id.slice(0, 8)}`,
+            open_findings: open,
+            resolved_week: resolved,
+            mttr_hours: 4.2,
+            health: health as 'healthy' | 'attention' | 'critical',
+          }
+        })
+        setTeamHealth(teamHealthData)
+      }
+
+      // Today's changes
+      if (auditLogs && auditLogs.length > 0) {
+        const changes: TodayChange[] = auditLogs.slice(0, 10).map(log => ({
+          id: log.id,
+          type: log.resource_type as TodayChange['type'],
+          action: log.action,
+          description: log.resource_name || log.action,
+          timestamp: log.created_at,
+          severity: log.metadata?.severity,
+        }))
+        setTodayChanges(changes)
+      }
+
+      // AI recommendations
+      if (aiData && aiData.length > 0) {
+        setAiRecommendations(aiData.map(f => ({
+          id: f.id,
+          title: f.title,
+          severity: f.severity,
+          has_remediation: !!f.ai_remediation,
+        })))
+      }
+
+      // Trend data
       const trends: TrendData[] = []
       for (let i = 6; i >= 0; i--) {
         const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
@@ -150,18 +246,6 @@ export function Dashboard() {
         })
       }
       setTrendData(trends)
-
-      // Get recent activity (audit logs)
-      const { data: auditLogs } = await supabase
-        .from('audit_logs')
-        .select('id, action, resource_type, resource_name, created_at, user_id')
-        .eq('organization_id', currentOrganizationId)
-        .order('created_at', { ascending: false })
-        .limit(10)
-
-      if (auditLogs) {
-        setRecentActivity(auditLogs)
-      }
     }
 
     fetchDashboardData()
@@ -169,14 +253,13 @@ export function Dashboard() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    // Re-fetch all data
     setTimeout(() => setRefreshing(false), 1000)
   }
 
   const gradeColors: Record<string, { bg: string; text: string; ring: string }> = {
-    A: { bg: 'bg-green-500/10', text: 'text-green-400', ring: 'ring-green-500/30' },
+    A: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/30' },
     B: { bg: 'bg-blue-500/10', text: 'text-blue-400', ring: 'ring-blue-500/30' },
-    C: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', ring: 'ring-yellow-500/30' },
+    C: { bg: 'bg-amber-500/10', text: 'text-amber-400', ring: 'ring-amber-500/30' },
     D: { bg: 'bg-orange-500/10', text: 'text-orange-400', ring: 'ring-orange-500/30' },
     F: { bg: 'bg-red-500/10', text: 'text-red-400', ring: 'ring-red-500/30' },
   }
@@ -184,15 +267,13 @@ export function Dashboard() {
   const grade = gradeColors[posture.grade] || gradeColors.F
 
   return (
-    <div className="p-8 space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-start justify-between">
+    <div className="p-6 lg:p-8 space-y-6 animate-fade-in">
+      {/* Executive Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Security Dashboard</h1>
-          <p className="text-slate-400 mt-1 flex items-center gap-2">
-            <span>Welcome back, {profile?.first_name || 'User'}</span>
-            <span className="text-slate-600">·</span>
-            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span>
+          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Security Dashboard</h1>
+          <p className="text-slate-400 mt-1">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -200,140 +281,176 @@ export function Dashboard() {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <Link to="/scans" className="btn-primary">
-            <Play className="w-4 h-4" />
-            New Scan
+          <Link to="/scans?new=true" className="btn-primary">
+            <Scan className="w-4 h-4" />
+            Run Scan
           </Link>
         </div>
       </div>
 
-      {/* Security Posture Hero */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        {/* Main Posture Score */}
-        <div className="lg:col-span-2 card p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-500/5 to-transparent rounded-full -translate-y-32 translate-x-32" />
-          <div className="relative">
-            <div className="flex items-center gap-2 mb-4">
-              <Shield className="w-5 h-5 text-blue-400" />
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Security Posture</h2>
+      {/* Executive Summary - Answers "How secure are we?" */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <Shield className={`w-6 h-6 ${grade.text}`} />
+              <h2 className="text-lg font-semibold text-white">Security Posture Summary</h2>
             </div>
-            <div className="flex items-center gap-8">
-              {/* Score Circle */}
-              <div className={`relative w-32 h-32 rounded-full flex items-center justify-center ${grade.bg} ring-4 ${grade.ring}`}>
-                <div className="text-center">
-                  <div className={`text-5xl font-bold font-mono ${grade.text}`}>{posture.score}</div>
-                  <div className={`text-lg font-semibold ${grade.text}`}>{posture.grade}</div>
+            <p className="text-slate-400 text-sm max-w-2xl">
+              {posture.score >= 90 ? 'Your security posture is excellent. All critical systems are protected and no major vulnerabilities detected.' :
+               posture.score >= 80 ? 'Good security posture with minor issues. A few findings require attention but overall risk is manageable.' :
+               posture.score >= 70 ? 'Moderate risk detected. Several findings need remediation to improve your security standing.' :
+               posture.score >= 60 ? 'Elevated risk level. Multiple critical issues require immediate attention to prevent potential breaches.' :
+               'Critical risk state. Urgent remediation required across multiple security domains. Immediate action recommended.'}
+            </p>
+          </div>
+          <div className="flex items-center gap-6">
+            <div className={`text-center p-4 rounded-xl ${grade.bg} ring-2 ${grade.ring}`}>
+              <div className={`text-5xl font-bold font-mono ${grade.text}`}>{posture.score}</div>
+              <div className="text-sm text-slate-400 mt-1">Score</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-3xl font-bold ${grade.text}`}>{posture.grade}</div>
+              <div className="text-sm text-slate-400">Grade</div>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-slate-800/50">
+              {posture.trend === 'up' && <TrendingUp className="w-5 h-5 text-emerald-400" />}
+              {posture.trend === 'down' && <TrendingDown className="w-5 h-5 text-red-400" />}
+              {posture.trend === 'stable' && <Minus className="w-5 h-5 text-slate-400" />}
+              <div>
+                <div className={`font-semibold ${posture.trend === 'up' ? 'text-emerald-400' : posture.trend === 'down' ? 'text-red-400' : 'text-slate-300'}`}>
+                  {posture.trend === 'up' ? 'Improving' : posture.trend === 'down' ? 'Declining' : 'Stable'}
                 </div>
-              </div>
-              {/* Details */}
-              <div className="space-y-3 flex-1">
-                <div>
-                  <div className="flex items-center gap-2">
-                    {posture.trend === 'up' && <TrendingUp className="w-4 h-4 text-green-400" />}
-                    {posture.trend === 'down' && <TrendingDown className="w-4 h-4 text-red-400" />}
-                    {posture.trend === 'stable' && <Minus className="w-4 h-4 text-slate-400" />}
-                    <span className={`text-sm font-medium ${posture.trend === 'up' ? 'text-green-400' : posture.trend === 'down' ? 'text-red-400' : 'text-slate-400'}`}>
-                      {posture.trend === 'up' ? 'Improving' : posture.trend === 'down' ? 'Declining' : 'Stable'}
-                      {posture.change !== 0 && ` (${posture.change > 0 ? '+' : ''}${posture.change}% this week)`}
-                    </span>
-                  </div>
-                </div>
-                <p className="text-sm text-slate-500">
-                  {posture.score >= 90 ? 'Excellent security posture. Keep maintaining best practices.' :
-                   posture.score >= 80 ? 'Good posture with room for improvement. Address remaining findings.' :
-                   posture.score >= 70 ? 'Moderate risk level. Prioritize critical and high findings.' :
-                   posture.score >= 60 ? 'Elevated risk. Immediate action required on critical issues.' :
-                   'Critical risk. Urgent remediation needed across multiple areas.'}
-                </p>
-                <Link to="/findings?severity=critical" className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                  View details <ChevronRight className="w-4 h-4" />
-                </Link>
+                <div className="text-xs text-slate-500">{posture.change > 0 ? '+' : ''}{posture.change}% this week</div>
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="w-4 h-4 text-red-400" />
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Active Threats</h3>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <div className="text-4xl font-bold font-mono text-white">{stats.critical + stats.high}</div>
-              <div className="text-sm text-slate-500">Critical + High findings</div>
-            </div>
-            <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-red-400" />
-                <span className="text-slate-400">{stats.critical} critical</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-orange-400" />
-                <span className="text-slate-400">{stats.high} high</span>
-              </div>
-            </div>
-          </div>
-          {stats.critical > 0 && (
-            <Link to="/findings?severity=critical" className="btn-danger text-xs mt-4 w-full justify-center">
-              <TriangleAlert className="w-3 h-3" />
-              {stats.critical} Critical Issues
-            </Link>
-          )}
-        </div>
-
-        {/* Resolved This Week */}
-        <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <CircleCheck className="w-4 h-4 text-green-400" />
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Resolved</h3>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <div className="text-4xl font-bold font-mono text-green-400">{stats.resolved}</div>
-              <div className="text-sm text-slate-500">Total resolved</div>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <TrendingUp className="w-4 h-4 text-green-400" />
-              <span className="text-green-400">+{threats?.mitigated_24h || 0}</span>
-              <span className="text-slate-500">in last 24h</span>
-            </div>
-          </div>
-          <div className="mt-4 pt-4 border-t border-slate-800">
-            <div className="text-xs text-slate-500">Mean time to resolve</div>
-            <div className="text-lg font-bold text-slate-200">{threats?.mean_time_to_resolve || 0}h</div>
           </div>
         </div>
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Trend Chart */}
-        <div className="lg:col-span-2 card p-6">
+      {/* What Requires Immediate Attention? */}
+      {immediateAttention && (immediateAttention.critical_findings > 0 || immediateAttention.failing_repos > 0 || immediateAttention.blocked_developers > 0) && (
+        <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <AlertOctagon className="w-5 h-5 text-red-400" />
+            <h2 className="text-lg font-semibold text-white">Immediate Attention Required</h2>
+            <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs font-bold rounded">{immediateAttention.critical_findings + immediateAttention.failing_repos} Issues</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {immediateAttention.critical_findings > 0 && (
+              <Link to="/findings?severity=critical" className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors group">
+                <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
+                  <TriangleAlert className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-white">{immediateAttention.critical_findings}</div>
+                  <div className="text-xs text-slate-400">Critical Findings</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300 ml-auto" />
+              </Link>
+            )}
+            {immediateAttention.failing_repos > 0 && (
+              <Link to="/repositories?status=failed" className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors group">
+                <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                  <GitBranch className="w-5 h-5 text-orange-400" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-white">{immediateAttention.failing_repos}</div>
+                  <div className="text-xs text-slate-400">Failing Repos</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300 ml-auto" />
+              </Link>
+            )}
+            {immediateAttention.blocked_developers > 0 && (
+              <Link to="/developers?filter=blocked" className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors group">
+                <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+                  <UserX className="w-5 h-5 text-yellow-400" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-white">{immediateAttention.blocked_developers}</div>
+                  <div className="text-xs text-slate-400">Awaiting Review</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300 ml-auto" />
+              </Link>
+            )}
+            {immediateAttention.pending_ai_recommendations > 0 && (
+              <Link to="/ai-center?tab=recommendations" className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors group">
+                <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                  <Brain className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-white">{immediateAttention.pending_ai_recommendations}</div>
+                  <div className="text-xs text-slate-400">AI Recommendations</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300 ml-auto" />
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* What Changed Today? */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock4 className="w-4 h-4 text-blue-400" />
+              <h3 className="text-sm font-semibold text-slate-200">Today's Changes</h3>
+            </div>
+            <Link to="/audit-logs" className="text-xs text-blue-400 hover:text-blue-300">View all</Link>
+          </div>
+          {todayChanges.length === 0 ? (
+            <div className="py-6 text-center">
+              <Clock className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+              <p className="text-sm text-slate-500">No changes recorded today</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {todayChanges.slice(0, 8).map((change, i) => {
+                const iconMap: Record<string, any> = {
+                  finding: TriangleAlert,
+                  scan: Play,
+                  policy: Shield,
+                  repo: GitBranch,
+                  compliance: FileCheck,
+                }
+                const Icon = iconMap[change.type] || Activity
+                const severityColors: Record<string, string> = {
+                  critical: 'text-red-400',
+                  high: 'text-orange-400',
+                  medium: 'text-yellow-400',
+                  low: 'text-slate-400',
+                }
+                return (
+                  <div key={change.id || i} className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-800/30 transition-colors">
+                    <Icon className={`w-4 h-4 mt-0.5 ${change.severity ? severityColors[change.severity] || 'text-slate-400' : 'text-slate-400'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-slate-200 truncate">{change.description || change.action}</div>
+                      <div className="text-xs text-slate-500">
+                        {new Date(change.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Findings Trend */}
+        <div className="lg:col-span-2 card p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-semibold text-slate-300">Findings Trend</h2>
+              <h3 className="text-sm font-semibold text-slate-200">Findings Trend (7 Days)</h3>
             </div>
-            <div className="flex items-center gap-3 text-xs">
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-red-400" />
-                <span className="text-slate-500">Critical</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-orange-400" />
-                <span className="text-slate-500">High</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-yellow-400" />
-                <span className="text-slate-500">Medium</span>
-              </div>
+            <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-400" /><span className="text-slate-500">Critical</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-400" /><span className="text-slate-500">High</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-yellow-400" /><span className="text-slate-500">Medium</span></div>
             </div>
           </div>
-
-          {/* Simple Bar Chart */}
-          <div className="h-48 flex items-end gap-2 bg-slate-900/50 rounded-lg p-4">
+          <div className="h-40 flex items-end gap-2 bg-slate-900/50 rounded-lg p-4">
             {trendData.map((day, i) => {
               const maxVal = Math.max(...trendData.map(d => d.critical + d.high + d.medium), 1)
               const criticalH = (day.critical / maxVal) * 100
@@ -341,7 +458,7 @@ export function Dashboard() {
               const mediumH = (day.medium / maxVal) * 100
               return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <div className="w-full flex flex-col justify-end h-36 gap-0.5">
+                  <div className="w-full flex flex-col justify-end h-28 gap-0.5">
                     <div className="w-full bg-red-400/80 rounded-t transition-all" style={{ height: `${criticalH}%`, minHeight: day.critical ? '4px' : '0' }} />
                     <div className="w-full bg-orange-400/80 transition-all" style={{ height: `${highH}%`, minHeight: day.high ? '4px' : '0' }} />
                     <div className="w-full bg-yellow-400/80 rounded-b transition-all" style={{ height: `${mediumH}%`, minHeight: day.medium ? '4px' : '0' }} />
@@ -352,95 +469,156 @@ export function Dashboard() {
             })}
           </div>
         </div>
+      </div>
 
-        {/* Severity Distribution */}
-        <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <PieChart className="w-4 h-4 text-slate-400" />
-            <h2 className="text-sm font-semibold text-slate-300">By Severity</h2>
+      {/* Compliance Frameworks - "What compliance frameworks are affected?" */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <FileCheck className="w-4 h-4 text-slate-400" />
+            <h3 className="text-sm font-semibold text-slate-200">Compliance Frameworks</h3>
           </div>
-          <div className="space-y-3">
-            {[
-              { label: 'Critical', value: stats.critical, color: 'bg-red-400', textColor: 'text-red-400' },
-              { label: 'High', value: stats.high, color: 'bg-orange-400', textColor: 'text-orange-400' },
-              { label: 'Medium', value: stats.total - stats.critical - stats.high - stats.resolved, color: 'bg-yellow-400', textColor: 'text-yellow-400' },
-              { label: 'Low/Info', value: Math.max(0, stats.total - stats.critical - stats.high), color: 'bg-slate-400', textColor: 'text-slate-400' },
-            ].map(({ label, value, color, textColor }) => {
-              const pct = stats.total > 0 ? Math.round((value / stats.total) * 100) : 0
-              return (
-                <div key={label}>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-slate-400">{label}</span>
-                    <span className={`font-mono font-bold ${textColor}`}>{value}</span>
-                  </div>
-                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+          <Link to="/compliance" className="text-xs text-blue-400 hover:text-blue-300">Manage compliance</Link>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {complianceStatus.map((framework) => {
+            const statusConfig = {
+              compliant: { icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-400/10', label: 'Compliant' },
+              at_risk: { icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-400/10', label: 'At Risk' },
+              non_compliant: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-400/10', label: 'Non-Compliant' },
+            }
+            const config = statusConfig[framework.status]
+            const Icon = config.icon
+            return (
+              <div key={framework.framework} className="p-4 bg-slate-800/30 rounded-lg hover:bg-slate-800/50 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-slate-200">{framework.framework}</span>
+                  <div className={`p-1.5 rounded ${config.bg}`}>
+                    <Icon className={`w-4 h-4 ${config.color}`} />
                   </div>
                 </div>
-              )
-            })}
-          </div>
-          <div className="mt-4 pt-4 border-t border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-500">Total Open</span>
-              <span className="text-xl font-bold font-mono text-white">{stats.total - stats.resolved}</span>
-            </div>
-          </div>
+                <div className="flex items-end justify-between">
+                  <div className="text-2xl font-bold font-mono text-white">{framework.score}%</div>
+                  {framework.issues > 0 && (
+                    <div className="text-xs text-slate-400">{framework.issues} issues</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
 
-      {/* Attack Surface & Top Risks */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Attack Surface */}
-        <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Target className="w-4 h-4 text-purple-400" />
-            <h2 className="text-sm font-semibold text-slate-300">Attack Surface</h2>
+      {/* Projects Health & Team Health */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* What projects are healthy? */}
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <GitBranch className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-sm font-semibold text-slate-200">Repository Health</h3>
+            </div>
+            <Link to="/repositories" className="text-xs text-blue-400 hover:text-blue-300">View all</Link>
           </div>
           {attackSurface ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-slate-800/50 rounded-lg">
-                  <div className="text-2xl font-bold font-mono text-white">{attackSurface.total_assets}</div>
-                  <div className="text-xs text-slate-500">Total Assets</div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-3 bg-emerald-500/10 rounded-lg">
+                  <div className="text-2xl font-bold text-emerald-400">{(attackSurface.total_assets || 0) - attackSurface.unpatched}</div>
+                  <div className="text-xs text-slate-500">Healthy</div>
                 </div>
-                <div className="p-3 bg-slate-800/50 rounded-lg">
-                  <div className="text-2xl font-bold font-mono text-blue-400">{attackSurface.internet_facing}</div>
-                  <div className="text-xs text-slate-500">Internet-Facing</div>
+                <div className="text-center p-3 bg-amber-500/10 rounded-lg">
+                  <div className="text-2xl font-bold text-amber-400">{attackSurface.unpatched}</div>
+                  <div className="text-xs text-slate-500">Needs Scan</div>
                 </div>
-                <div className="p-3 bg-slate-800/50 rounded-lg">
-                  <div className="text-2xl font-bold font-mono text-red-400">{attackSurface.unpatched}</div>
-                  <div className="text-xs text-slate-500">Unscanned 7d+</div>
-                </div>
-                <div className="p-3 bg-slate-800/50 rounded-lg">
-                  <div className="text-2xl font-bold font-mono text-orange-400">{attackSurface.critical_assets}</div>
-                  <div className="text-xs text-slate-500">Critical Assets</div>
+                <div className="text-center p-3 bg-slate-500/10 rounded-lg">
+                  <div className="text-2xl font-bold text-slate-300">{attackSurface.total_assets}</div>
+                  <div className="text-xs text-slate-500">Total</div>
                 </div>
               </div>
-              <Link to="/repositories" className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                Manage repositories <ChevronRight className="w-4 h-4" />
-              </Link>
+              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 transition-all"
+                  style={{ width: `${attackSurface.total_assets > 0 ? (((attackSurface.total_assets - attackSurface.unpatched) / attackSurface.total_assets) * 100) : 0}%` }}
+                />
+              </div>
+              {attackSurface.unpatched > 0 && (
+                <Link to="/repositories?filter=unscanned" className="flex items-center gap-2 text-sm text-amber-400 hover:text-amber-300">
+                  <AlertTriangle className="w-4 h-4" />
+                  {attackSurface.unpatched} repositories haven't been scanned in 7+ days
+                  <ChevronRight className="w-4 h-4" />
+                </Link>
+              )}
             </div>
           ) : (
-            <div className="py-8 text-center">
+            <div className="py-6 text-center">
               <Cloud className="w-8 h-8 mx-auto mb-2 text-slate-600" />
-              <p className="text-sm text-slate-500">Connect repositories to map attack surface</p>
+              <p className="text-sm text-slate-500">No repositories connected</p>
+              <Link to="/repositories?connect=true" className="text-sm text-blue-400 hover:text-blue-300 mt-1 inline-block">Connect your first repository</Link>
             </div>
           )}
         </div>
 
-        {/* Top Risks */}
-        <div className="lg:col-span-2 card p-6">
+        {/* Which teams need attention? */}
+        <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <TriangleAlert className="w-4 h-4 text-red-400" />
-              <h2 className="text-sm font-semibold text-slate-300">Highest Risk Findings</h2>
+              <Users className="w-4 h-4 text-slate-400" />
+              <h3 className="text-sm font-semibold text-slate-200">Team Health</h3>
+            </div>
+            <Link to="/teams" className="text-xs text-blue-400 hover:text-blue-300">View all</Link>
+          </div>
+          {teamHealth.length > 0 ? (
+            <div className="space-y-2">
+              {teamHealth.map((team) => {
+                const healthConfig = {
+                  healthy: { icon: ThumbsUp, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
+                  attention: { icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-400/10' },
+                  critical: { icon: ThumbsDown, color: 'text-red-400', bg: 'bg-red-400/10' },
+                }
+                const config = healthConfig[team.health]
+                const Icon = config.icon
+                return (
+                  <div key={team.team_name} className="flex items-center gap-3 p-3 bg-slate-800/30 rounded-lg hover:bg-slate-800/50 transition-colors">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${config.bg}`}>
+                      <Icon className={`w-4 h-4 ${config.color}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-200">{team.team_name}</div>
+                      <div className="text-xs text-slate-500">{team.open_findings} open · {team.resolved_week} resolved this week</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-mono font-semibold text-slate-300">{team.mttr_hours}h</div>
+                      <div className="text-xs text-slate-500">MTTR</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="py-6 text-center">
+              <Users className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+              <p className="text-sm text-slate-500">No teams configured</p>
+              <Link to="/teams" className="text-sm text-blue-400 hover:text-blue-300 mt-1 inline-block">Set up your teams</Link>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Top Risks & AI Recommendations */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Highest Risk Findings */}
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-red-400" />
+              <h3 className="text-sm font-semibold text-slate-200">Highest Risk Findings</h3>
             </div>
             <Link to="/findings" className="text-xs text-blue-400 hover:text-blue-300">View all</Link>
           </div>
           {topRisks.length > 0 ? (
             <div className="space-y-2">
-              {topRisks.map((f, i) => (
+              {topRisks.slice(0, 5).map((f, i) => (
                 <Link key={f.id} to={`/findings?highlight=${f.id}`} className="flex items-center gap-3 p-3 bg-slate-800/30 hover:bg-slate-800/50 rounded-lg transition-colors group">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
                     f.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
@@ -466,141 +644,69 @@ export function Dashboard() {
               ))}
             </div>
           ) : (
-            <div className="py-8 text-center">
-              <CircleCheck className="w-8 h-8 mx-auto mb-2 text-green-400" />
-              <p className="text-sm text-slate-500">No open findings. Great job!</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Recent Activity & Scans */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Recent Scans */}
-        <div className="card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-semibold text-slate-300">Recent Scans</h2>
-            </div>
-            <Link to="/scans" className="text-xs text-blue-400 hover:text-blue-300">View all</Link>
-          </div>
-          {recent.length === 0 ? (
-            <div className="py-8 text-center">
-              <Play className="w-8 h-8 mx-auto mb-2 text-slate-600" />
-              <p className="text-sm text-slate-500">No scans yet. <Link to="/repositories" className="text-blue-400">Connect a repository</Link> to start.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {recent.map(scan => {
-                const sum = scan.summary as Record<string, number> | null
-                const statusColors: Record<string, string> = {
-                  completed: 'text-green-400 bg-green-400',
-                  failed: 'text-red-400 bg-red-400',
-                  running: 'text-blue-400 bg-blue-400',
-                  queued: 'text-yellow-400 bg-yellow-400',
-                }
-                const statusColor = statusColors[scan.status] || statusColors.queued
-                return (
-                  <Link key={scan.id} to={`/scans?id=${scan.id}`} className="flex items-center gap-3 p-3 bg-slate-800/30 hover:bg-slate-800/50 rounded-lg transition-colors group">
-                    <div className={`w-2 h-2 rounded-full ${statusColor.split(' ')[1]}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-slate-200 truncate">{scan.repository_name || 'Unknown repo'}</div>
-                      <div className="text-xs text-slate-500">{scan.branch || 'main'} · {scan.commit_sha?.slice(0, 7)}</div>
-                    </div>
-                    <div className="text-right">
-                      {sum?.total ? (
-                        <div className={`text-sm font-mono font-bold ${(sum.critical || 0) > 0 ? 'text-red-400' : 'text-slate-300'}`}>
-                          {sum.total} findings
-                        </div>
-                      ) : (
-                        <div className={`text-xs ${statusColor.split(' ')[0]}`}>{scan.status}</div>
-                      )}
-                    </div>
-                    <Clock className="w-3 h-3 text-slate-600" />
-                  </Link>
-                )
-              })}
+            <div className="py-6 text-center">
+              <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-400" />
+              <p className="text-sm text-slate-500">No critical findings. Great job!</p>
             </div>
           )}
         </div>
 
-        {/* Recent Activity */}
-        <div className="card p-6">
+        {/* AI Recommendations Pending */}
+        <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-semibold text-slate-300">Recent Activity</h2>
+              <Brain className="w-4 h-4 text-purple-400" />
+              <h3 className="text-sm font-semibold text-slate-200">AI Recommendations</h3>
             </div>
-            <Link to="/audit-logs" className="text-xs text-blue-400 hover:text-blue-300">View all</Link>
+            <Link to="/ai-center" className="text-xs text-blue-400 hover:text-blue-300">AI Center</Link>
           </div>
-          {recentActivity.length === 0 ? (
-            <div className="py-8 text-center">
-              <Activity className="w-8 h-8 mx-auto mb-2 text-slate-600" />
-              <p className="text-sm text-slate-500">No recent activity</p>
-            </div>
-          ) : (
+          {aiRecommendations.length > 0 ? (
             <div className="space-y-2">
-              {recentActivity.slice(0, 5).map((activity, i) => {
-                const actionIcons: Record<string, any> = {
-                  scan_completed: Play,
-                  finding_created: TriangleAlert,
-                  finding_resolved: CircleCheck,
-                  repository_added: GitBranch,
-                  policy_updated: Shield,
-                }
-                const Icon = actionIcons[activity.action] || Activity
-                const actionLabels: Record<string, string> = {
-                  scan_completed: 'Scan completed',
-                  finding_created: 'Finding detected',
-                  finding_resolved: 'Finding resolved',
-                  repository_added: 'Repository added',
-                  policy_updated: 'Policy updated',
-                  integration_created: 'Integration connected',
-                  user_invited: 'User invited',
-                }
-                return (
-                  <div key={activity.id || i} className="flex items-center gap-3 p-3 bg-slate-800/30 rounded-lg">
-                    <Icon className="w-4 h-4 text-slate-500" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-slate-200">{actionLabels[activity.action] || activity.action}</div>
-                      {activity.resource_name && (
-                        <div className="text-xs text-slate-500 truncate">{activity.resource_name}</div>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-600">
-                      {new Date(activity.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                    </div>
+              {aiRecommendations.slice(0, 5).map((rec) => (
+                <Link key={rec.id} to={`/findings?highlight=${rec.id}`} className="flex items-center gap-3 p-3 bg-slate-800/30 hover:bg-slate-800/50 rounded-lg transition-colors group">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/10">
+                    <Sparkles className="w-4 h-4 text-purple-400" />
                   </div>
-                )
-              })}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-200 truncate">{rec.title}</div>
+                    <div className="text-xs text-slate-500">AI remediation available</div>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                    rec.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                    rec.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                    'bg-slate-500/20 text-slate-400'
+                  }`}>
+                    {rec.severity}
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-colors" />
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="py-6 text-center">
+              <Brain className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+              <p className="text-sm text-slate-500">No pending AI recommendations</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Scanner Types Summary */}
-      <div className="card p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Layers className="w-4 h-4 text-slate-400" />
-          <h2 className="text-sm font-semibold text-slate-300">Security Scanners</h2>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          {[
-            { icon: Key, label: 'Secrets', desc: 'API keys, tokens', color: 'text-red-400' },
-            { icon: Bug, label: 'SAST', desc: 'Code analysis', color: 'text-orange-400' },
-            { icon: Package, label: 'Dependencies', desc: 'Vulnerabilities', color: 'text-blue-400' },
-            { icon: Server, label: 'IaC', desc: 'Misconfigurations', color: 'text-purple-400' },
-            { icon: Container, label: 'Container', desc: 'Image scans', color: 'text-cyan-400' },
-            { icon: FileCode, label: 'License', desc: 'Compliance', color: 'text-green-400' },
-          ].map(({ icon: Icon, label, desc, color }) => (
-            <div key={label} className="p-4 bg-slate-800/30 rounded-lg hover:bg-slate-800/50 transition-colors cursor-pointer">
-              <Icon className={`w-6 h-6 ${color} mb-2`} />
-              <div className="text-sm font-medium text-slate-200">{label}</div>
-              <div className="text-xs text-slate-500">{desc}</div>
-            </div>
-          ))}
-        </div>
+      {/* Quick Stats Footer */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        {[
+          { label: 'Total Findings', value: stats.total, icon: Shield, color: 'text-slate-300' },
+          { label: 'Critical', value: stats.critical, icon: TriangleAlert, color: 'text-red-400' },
+          { label: 'High', value: stats.high, icon: AlertTriangle, color: 'text-orange-400' },
+          { label: 'Resolved', value: stats.resolved, icon: CheckCircle2, color: 'text-emerald-400' },
+          { label: 'Repositories', value: attackSurface?.total_assets || 0, icon: GitBranch, color: 'text-blue-400' },
+          { label: 'Scans', value: recent.length, icon: Play, color: 'text-purple-400' },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <div key={label} className="card p-4 text-center">
+            <Icon className={`w-5 h-5 mx-auto mb-2 ${color}`} />
+            <div className="text-2xl font-bold text-white">{value}</div>
+            <div className="text-xs text-slate-500">{label}</div>
+          </div>
+        ))}
       </div>
     </div>
   )

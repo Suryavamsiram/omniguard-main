@@ -11,6 +11,11 @@ import { Compliance } from './pages/Compliance'
 import { Teams } from './pages/Teams'
 import { AuditLogs } from './pages/AuditLogs'
 import { Settings } from './pages/Settings'
+import { ThreatInsights } from './pages/ThreatInsights'
+import { AICenter } from './pages/AICenter'
+import { KnowledgeBase } from './pages/KnowledgeBase'
+import { Integrations } from './pages/Integrations'
+import { Developers } from './pages/Developers'
 import { ComingSoon } from './pages/ComingSoon'
 
 function Guard({ children }: { children: React.ReactNode }) {
@@ -45,7 +50,7 @@ function AppRoutes() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/security-posture" element={<ComingSoon title="Security Posture" description="Comprehensive security posture assessment with historical trends and benchmarking." />} />
               <Route path="/attack-surface" element={<ComingSoon title="Attack Surface" description="Visualize and manage your organization's attack surface across all assets." />} />
-              <Route path="/threat-insights" element={<ComingSoon title="Threat Insights" description="Real-time threat intelligence and security event correlation." />} />
+              <Route path="/threat-insights" element={<ThreatInsights />} />
 
               {/* Assets */}
               <Route path="/organizations" element={<ComingSoon title="Organizations" description="Manage your organizations and their security settings." />} />
@@ -62,17 +67,17 @@ function AppRoutes() {
               <Route path="/risk-analysis" element={<ComingSoon title="Risk Analysis" description="Advanced risk scoring and prioritization based on business context." />} />
 
               {/* AI Center */}
-              <Route path="/ai-center" element={<ComingSoon title="AI Analysis Center" description="AI-powered security analysis, remediation suggestions, and pattern recognition." />} />
-              <Route path="/knowledge-base" element={<ComingSoon title="Knowledge Base" description="Custom security policies, rules, and organizational context for AI analysis." />} />
+              <Route path="/ai-center" element={<AICenter />} />
+              <Route path="/knowledge-base" element={<KnowledgeBase />} />
               <Route path="/policy-marketplace" element={<ComingSoon title="Policy Marketplace" description="Community-curated security policies and detection rules." />} />
 
               {/* Team */}
-              <Route path="/developers" element={<ComingSoon title="Developers" description="View and manage developer access and security metrics." />} />
+              <Route path="/developers" element={<Developers />} />
               <Route path="/teams" element={<Teams />} />
               <Route path="/scorecards" element={<ComingSoon title="Developer Scorecards" description="Security awareness metrics and developer training progress." />} />
 
               {/* Integrations */}
-              <Route path="/integrations" element={<ComingSoon title="Integrations" description="Connect with GitHub, GitLab, Jira, Slack, and more." />} />
+              <Route path="/integrations" element={<Integrations />} />
               <Route path="/webhooks" element={<ComingSoon title="Webhooks" description="Configure webhooks for real-time security event notifications." />} />
               <Route path="/api-keys" element={<ComingSoon title="API Keys" description="Manage API keys for programmatic access to OmniGuard." />} />
               <Route path="/agents" element={<ComingSoon title="Agents" description="Manage local agents and daemon configurations." />} />

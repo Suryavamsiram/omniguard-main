@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useNavigate, useLocation, useParams } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation, useParams, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useNotifications } from '../hooks/useRepositories'
-import { Shield, LayoutDashboard, GitBranch, TriangleAlert, Play, ClipboardList, ShieldCheck, Users, FileText, Settings, LogOut, Bell, X, ChevronDown, ChevronRight, Search, Building2, Projector as Projects, Server, Lock, Key, Globe, Activity, ChartBar as BarChart3, Cloud, Code, Package, Layers, Brain, BookOpen, CreditCard, UserCog, Puzzle, Zap, ExternalLink, Command, Menu, Moon, Sun, Circle as HelpCircle, Briefcase, Target, CircleAlert as AlertCircle, TrendingUp, BadgeCheck } from 'lucide-react'
+import { CommandPalette, useCommandPalette } from './CommandPalette'
+import { Shield, LayoutDashboard, GitBranch, TriangleAlert, Play, ClipboardList, ShieldCheck, Users, FileText, Settings, LogOut, Bell, X, ChevronDown, ChevronRight, Building2, Projector as Projects, Server, Lock, Key, Globe, Activity, ChartBar as BarChart3, Cloud, Code, Package, Layers, Brain, BookOpen, CreditCard, UserCog, Puzzle, Zap, ExternalLink, Menu, Moon, Sun, Circle as HelpCircle, Briefcase, Target, CircleAlert as AlertCircle, TrendingUp, BadgeCheck } from 'lucide-react'
 
 interface NavGroup {
   label: string
@@ -143,81 +144,6 @@ function NavItem({ item }: { item: NavItem }) {
   )
 }
 
-function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [query, setQuery] = useState('')
-  const navigate = useNavigate()
-
-  const allItems = NAV_GROUPS.flatMap(g => g.items)
-  const filtered = query
-    ? allItems.filter(item => item.label.toLowerCase().includes(query.toLowerCase()))
-    : allItems.slice(0, 6)
-
-  useEffect(() => {
-    if (open) setQuery('')
-  }, [open])
-
-  if (!open) return null
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-24 px-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div
-        className="relative w-full max-w-xl bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-3 p-4 border-b border-slate-700">
-          <Search className="w-5 h-5 text-slate-500" />
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search commands, pages, settings..."
-            className="flex-1 bg-transparent text-white text-lg outline-none placeholder:text-slate-500"
-            autoFocus
-          />
-          <kbd className="hidden md:inline-flex items-center gap-1 px-2 py-1 text-xs text-slate-500 bg-slate-900 rounded">
-            <Command className="w-3 h-3" />K
-          </kbd>
-        </div>
-        <div className="max-h-80 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">
-              <Search className="w-8 h-8 mx-auto mb-2" />
-              <p>No results found</p>
-            </div>
-          ) : (
-            <div className="p-2">
-              {filtered.map((item) => (
-                <button
-                  key={item.to}
-                  onClick={() => {
-                    navigate(item.to)
-                    onClose()
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-700/50 transition-colors text-left"
-                >
-                  <item.icon className="w-5 h-5 text-slate-400" />
-                  <span className="text-slate-200">{item.label}</span>
-                  {item.badge && (
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${item.badgeColor || 'bg-slate-600'} text-white`}>
-                      {item.badge}
-                    </span>
-                  )}
-                  <ChevronRight className="w-4 h-4 text-slate-600 ml-auto" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="p-3 border-t border-slate-700 flex items-center gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-slate-900 rounded">↑</kbd><kbd className="px-1.5 py-0.5 bg-slate-900 rounded">↓</kbd> Navigate</span>
-          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-slate-900 rounded">Enter</kbd> Select</span>
-          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-slate-900 rounded">Esc</kbd> Close</span>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, profile, memberships, currentOrganizationId, setCurrentOrganizationId, signOut } = useAuth()
@@ -225,24 +151,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [showNotifs, setShowNotifs] = useState(false)
   const [showOrgMenu, setShowOrgMenu] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
-  const [showSearch, setShowSearch] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const { isOpen: commandPaletteOpen, open: openCommandPalette, close: closeCommandPalette } = useCommandPalette()
   const navigate = useNavigate()
 
   const orgs = memberships.map(m => ({ id: m.organization_id, name: m.organization_id.slice(0, 8), role: m.role }))
   const displayName = profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email : user?.email || ''
   const initials = displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U'
 
-  // Keyboard shortcut for search
+  // Keyboard shortcut for closing dropdowns
   useEffect(() => {
     const handleKeydown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        setShowSearch(true)
-      }
       if (e.key === 'Escape') {
-        setShowSearch(false)
         setShowNotifs(false)
         setShowOrgMenu(false)
         setShowUserMenu(false)
@@ -402,7 +323,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
           {/* Search */}
           <button
-            onClick={() => setShowSearch(true)}
+            onClick={openCommandPalette}
             className="hidden md:flex items-center gap-3 px-4 py-2 w-72 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-500 hover:border-slate-600 transition-colors"
           >
             <Search className="w-4 h-4" />
@@ -546,8 +467,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </footer>
       </div>
 
-      {/* Search Modal */}
-      <SearchModal open={showSearch} onClose={() => setShowSearch(false)} />
+            {/* Command Palette */}
+      <CommandPalette isOpen={commandPaletteOpen} onClose={closeCommandPalette} />
     </div>
   )
 }
